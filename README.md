@@ -20,15 +20,51 @@ Open-Meteo 免费 API 仅适合符合其条款的非商业用途，正式商业�
 
 ## 官方天气预警
 
-和风天气预警使用编译期配置，不要把令牌写入源码：
+和风天气预警直接使用 iOS 和 Android 各自的 API KEY。真实 KEY 仅通过编译期参数注入，不要写入源码：
 
 ```bash
-flutter run \
+flutter run -d <iOS设备ID> \
   --dart-define=QWEATHER_API_HOST=你的API_HOST \
-  --dart-define=QWEATHER_TOKEN=你的JWT令牌
+  --dart-define=QWEATHER_IOS_API_KEY=你的iOS_API_KEY
+
+flutter run -d <Android设备ID> \
+  --dart-define=QWEATHER_API_HOST=你的API_HOST \
+  --dart-define=QWEATHER_ANDROID_API_KEY=你的Android_API_KEY \
+  --dart-define=QWEATHER_ANDROID_CERT_SHA1=你的Android签名证书SHA-1
 ```
 
-未提供这两个参数时，天气功能照常运行，只是不请求官方预警。客户端参数仍可被逆向读取；正式产品若需要长期保密凭据，应通过自己的服务端代理请求。
+也可以分别保存在不会提交到 Git 的 `.secrets/qweather-ios.json` 和 `.secrets/qweather-android.json` 中。不要在同一次构建中传入两个平台的 KEY，以免另一平台的 KEY 也进入安装包。
+
+`.secrets/qweather-ios.json`：
+
+```json
+{
+  "QWEATHER_API_HOST": "你的API_HOST",
+  "QWEATHER_IOS_API_KEY": "你的iOS_API_KEY"
+}
+```
+
+`.secrets/qweather-android.json`：
+
+```json
+{
+  "QWEATHER_API_HOST": "你的API_HOST",
+  "QWEATHER_ANDROID_API_KEY": "你的Android_API_KEY",
+  "QWEATHER_ANDROID_CERT_SHA1": "你的Android签名证书SHA-1"
+}
+```
+
+```bash
+flutter run -d <iOS设备ID> \
+  --dart-define-from-file=.secrets/qweather-ios.json
+
+flutter run -d <Android设备ID> \
+  --dart-define-from-file=.secrets/qweather-android.json
+```
+
+请求会按当前平台自动选择对应 KEY。iOS 请求使用和风天气 Web API 要求的 `X-iOS-Bundle-Id` 请求头，默认 Bundle ID 为 `com.murphyweather.murphy`；Android 默认携带包名 `com.murphyweather.murphy` 和当前开发证书 SHA-1。更换正式 Android 签名后，使用 `QWEATHER_ANDROID_CERT_SHA1` 传入正式证书指纹。
+
+未提供 API Host 或当前平台的 API KEY 时，天气功能照常运行，只是不请求官方预警。客户端参数仍可被逆向读取，应在和风天气控制台为两个 KEY 分别设置应用限制、API 限制和合理额度，并定期轮换凭据。
 
 ## 运行
 

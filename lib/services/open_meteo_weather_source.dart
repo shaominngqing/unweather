@@ -5,8 +5,9 @@ import 'package:http/http.dart' as http;
 
 import '../models/resolved_location.dart';
 import '../models/weather.dart';
-import 'weather_source.dart';
 import 'weather_alert_source.dart';
+import 'weather_source.dart';
+import 'wmo_weather_code.dart';
 
 class WeatherDataFailure implements Exception {
   const WeatherDataFailure(this.message);
@@ -147,7 +148,9 @@ class OpenMeteoWeatherSource implements WeatherSource {
     );
     if (currentHourIndex < 0) currentHourIndex = 0;
 
-    final currentCondition = _condition(_integer(current['weather_code']));
+    final currentCondition = weatherConditionFromWmoCode(
+      _integer(current['weather_code']),
+    );
     final dailyItems = _parseDaily(daily);
     if (dailyItems.isEmpty) {
       throw const WeatherDataFailure('每日天气数据缺失');
@@ -238,7 +241,7 @@ class OpenMeteoWeatherSource implements WeatherSource {
           time: DateTime.parse(times[index]),
           temperature: temperatures[index].round(),
           feelsLike: apparent[index].round(),
-          condition: _condition(codes[index].round()),
+          condition: weatherConditionFromWmoCode(codes[index].round()),
           rainChance: chances[index].round(),
           precipitation: precipitation[index],
           humidity: humidity[index].round(),
@@ -276,7 +279,7 @@ class OpenMeteoWeatherSource implements WeatherSource {
           date: DateTime.parse(dates[index]),
           high: highs[index].round(),
           low: lows[index].round(),
-          condition: _condition(codes[index].round()),
+          condition: weatherConditionFromWmoCode(codes[index].round()),
           rainChance: chances[index].round(),
           precipitation: precipitation[index],
           uvIndex: uv[index],
@@ -284,23 +287,6 @@ class OpenMeteoWeatherSource implements WeatherSource {
           sunset: DateTime.parse(sunset[index]),
         ),
     ];
-  }
-
-  WeatherCondition _condition(int code) {
-    if (code == 0) return WeatherCondition.clear;
-    if (code <= 2) return WeatherCondition.partlyCloudy;
-    if (code == 3) return WeatherCondition.cloudy;
-    if (code == 45 || code == 48) return WeatherCondition.haze;
-    if ((code >= 51 && code <= 57) || code == 61 || code == 80) {
-      return WeatherCondition.lightRain;
-    }
-    if (code == 63 || code == 66 || code == 81) return WeatherCondition.rain;
-    if (code == 65 || code == 67 || code == 82) {
-      return WeatherCondition.heavyRain;
-    }
-    if (code >= 71 && code <= 86) return WeatherCondition.snow;
-    if (code >= 95) return WeatherCondition.thunderstorm;
-    return WeatherCondition.cloudy;
   }
 
   String _summary(WeatherCondition condition, int rainChance) {
@@ -312,8 +298,10 @@ class OpenMeteoWeatherSource implements WeatherSource {
       WeatherCondition.lightRain => '可能有间歇性小雨，降水概率保持谨慎。',
       WeatherCondition.rain => '降雨可能持续一段时间，情况仍在发展。',
       WeatherCondition.heavyRain => '降雨较强，天气这次没有开玩笑，请留意最新预警信息。',
+      WeatherCondition.freezingRain => '可能出现冻雨或冻毛毛雨，路面容易结冰，请谨慎出行。',
       WeatherCondition.thunderstorm => '天空的意见比较响亮，可能出现雷电，请减少户外活动。',
       WeatherCondition.snow => '道路正在重新考虑摩擦力；可能有降雪，出行请注意安全。',
+      WeatherCondition.fog => '雾气影响能见度，驾车请减速并保持安全距离。',
       WeatherCondition.haze => '远方今天决定低调一些，能见度和空气质量偏低，请做好防护。',
     };
   }

@@ -5,8 +5,10 @@ class MurphyWeatherAdapter {
 
   static const _protectedConditions = {
     WeatherCondition.heavyRain,
+    WeatherCondition.freezingRain,
     WeatherCondition.thunderstorm,
     WeatherCondition.snow,
+    WeatherCondition.fog,
     WeatherCondition.haze,
   };
 
@@ -110,8 +112,10 @@ class MurphyWeatherAdapter {
       WeatherCondition.lightRain => '可能有间歇性小雨，降水概率保持谨慎。',
       WeatherCondition.rain => '降雨可能持续一段时间，情况仍在发展。',
       WeatherCondition.heavyRain => '降雨较强，天气这次没有开玩笑，请留意最新预警信息。',
+      WeatherCondition.freezingRain => '可能出现冻雨或冻毛毛雨，路面容易结冰，请谨慎出行。',
       WeatherCondition.thunderstorm => '天空的意见比较响亮，可能出现雷电，请减少户外活动。',
       WeatherCondition.snow => '道路正在重新考虑摩擦力；有降雪，出行请注意安全。',
+      WeatherCondition.fog => '雾气影响能见度，驾车请减速并保持安全距离。',
       WeatherCondition.haze => '远方今天决定低调一些，能见度和空气质量偏低，请做好防护。',
     };
   }

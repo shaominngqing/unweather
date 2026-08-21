@@ -47,6 +47,20 @@ void main() {
     expect(result.hourly.first.rainChance, 80);
   });
 
+  test('never adapts freezing rain or fog', () {
+    for (final condition in const [
+      WeatherCondition.freezingRain,
+      WeatherCondition.fog,
+    ]) {
+      final source = testWeather(condition: condition);
+      final result = adapter.apply(source);
+
+      expect(result.condition, condition);
+      expect(result.hourly.first.condition, condition);
+      expect(result.daily.first.condition, condition);
+    }
+  });
+
   test('weather report survives cache serialization', () {
     final report = testWeather();
     final restored = WeatherReport.fromJson(report.toJson());

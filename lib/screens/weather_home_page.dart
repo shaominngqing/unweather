@@ -6,6 +6,7 @@ import '../models/resolved_location.dart';
 import '../models/weather.dart';
 import '../services/location_service.dart';
 import '../services/weather_repository.dart';
+import '../widgets/weather_icon.dart';
 
 class WeatherHomePage extends StatefulWidget {
   const WeatherHomePage({required this.repository, super.key});
@@ -183,7 +184,10 @@ class _WeatherView extends StatelessWidget {
                           _AlertCard(alert: report.alerts.first),
                         ],
                         const SizedBox(height: 28),
-                        _HourlyForecastCard(items: report.hourly),
+                        _HourlyForecastCard(
+                          items: report.hourly,
+                          days: report.daily,
+                        ),
                         const SizedBox(height: 12),
                         _PrecipitationCard(items: report.hourly),
                         const SizedBox(height: 12),
@@ -303,16 +307,17 @@ class _CurrentWeather extends StatelessWidget {
     return Semantics(
       container: true,
       label:
-          '${report.city}${report.district}，当前${_labelFor(report.condition)}，'
+          '${report.city}${report.district}，当前${weatherConditionLabel(report.condition)}，'
           '${report.temperature}度，最高${report.high}度，最低${report.low}度。'
           '${report.summary}',
       child: ExcludeSemantics(
         child: Column(
           children: [
-            Icon(
-              _iconFor(report.condition),
+            WeatherIcon(
+              condition: report.condition,
               size: 62,
               color: Colors.white.withValues(alpha: 0.96),
+              isNight: !report.isDay,
             ),
             const SizedBox(height: 8),
             FittedBox(
@@ -324,7 +329,7 @@ class _CurrentWeather extends StatelessWidget {
             ),
             const SizedBox(height: 9),
             Text(
-              _labelFor(report.condition),
+              weatherConditionLabel(report.condition),
               style: theme.textTheme.headlineMedium,
             ),
             const SizedBox(height: 6),
@@ -400,9 +405,10 @@ class _AlertCard extends StatelessWidget {
 }
 
 class _HourlyForecastCard extends StatelessWidget {
-  const _HourlyForecastCard({required this.items});
+  const _HourlyForecastCard({required this.items, required this.days});
 
   final List<HourForecast> items;
+  final List<DayForecast> days;
 
   @override
   Widget build(BuildContext context) {
@@ -454,6 +460,7 @@ class _HourlyForecastCard extends StatelessWidget {
                           child: _HourColumn(
                             item: visible[index],
                             isNow: index == 0,
+                            isNight: _isNightAt(visible[index].time, days),
                           ),
                         ),
                     ],
@@ -469,10 +476,15 @@ class _HourlyForecastCard extends StatelessWidget {
 }
 
 class _HourColumn extends StatelessWidget {
-  const _HourColumn({required this.item, required this.isNow});
+  const _HourColumn({
+    required this.item,
+    required this.isNow,
+    required this.isNight,
+  });
 
   final HourForecast item;
   final bool isNow;
+  final bool isNight;
 
   @override
   Widget build(BuildContext context) {
@@ -483,7 +495,7 @@ class _HourColumn extends StatelessWidget {
           style: _secondaryStyle(12),
         ),
         const SizedBox(height: 10),
-        Icon(_iconFor(item.condition), size: 23),
+        WeatherIcon(condition: item.condition, size: 23, isNight: isNight),
         const SizedBox(height: 10),
         Text(
           '${item.temperature}°',
@@ -685,7 +697,12 @@ class _DailyRow extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          SizedBox(width: 31, child: Icon(_iconFor(item.condition), size: 22)),
+          SizedBox(
+            width: 31,
+            child: Center(
+              child: WeatherIcon(condition: item.condition, size: 22),
+            ),
+          ),
           SizedBox(
             width: 37,
             child: Text(
@@ -1773,32 +1790,17 @@ List<Color> _backgroundColors(WeatherCondition condition, bool isDay) {
   };
 }
 
-IconData _iconFor(WeatherCondition condition) {
-  return switch (condition) {
-    WeatherCondition.clear => Icons.wb_sunny_outlined,
-    WeatherCondition.partlyCloudy => Icons.wb_cloudy_outlined,
-    WeatherCondition.cloudy => Icons.cloud_outlined,
-    WeatherCondition.lightRain => Icons.grain_rounded,
-    WeatherCondition.rain => Icons.water_drop_outlined,
-    WeatherCondition.heavyRain => Icons.water_rounded,
-    WeatherCondition.thunderstorm => Icons.thunderstorm_outlined,
-    WeatherCondition.snow => Icons.ac_unit_rounded,
-    WeatherCondition.haze => Icons.blur_on_rounded,
-  };
-}
-
-String _labelFor(WeatherCondition condition) {
-  return switch (condition) {
-    WeatherCondition.clear => '晴',
-    WeatherCondition.partlyCloudy => '多云',
-    WeatherCondition.cloudy => '阴',
-    WeatherCondition.lightRain => '小雨',
-    WeatherCondition.rain => '阵雨',
-    WeatherCondition.heavyRain => '大雨',
-    WeatherCondition.thunderstorm => '雷阵雨',
-    WeatherCondition.snow => '雪',
-    WeatherCondition.haze => '霾',
-  };
+bool _isNightAt(DateTime time, List<DayForecast> days) {
+  for (final day in days) {
+    final sameDate =
+        day.date.year == time.year &&
+        day.date.month == time.month &&
+        day.date.day == time.day;
+    if (sameDate) {
+      return time.isBefore(day.sunrise) || !time.isBefore(day.sunset);
+    }
+  }
+  return time.hour < 6 || time.hour >= 18;
 }
 
 String _weekday(DateTime date) {

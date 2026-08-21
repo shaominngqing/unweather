@@ -5,8 +5,10 @@ enum WeatherCondition {
   lightRain,
   rain,
   heavyRain,
+  freezingRain,
   thunderstorm,
   snow,
+  fog,
   haze,
 }
 
