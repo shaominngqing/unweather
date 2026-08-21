@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -130,5 +132,5 @@ void main() {
       find.byKey(const ValueKey('weather-icon-sheet')),
       matchesGoldenFile('goldens/weather_icons.png'),
     );
-  });
+  }, skip: !Platform.isMacOS);
 }
