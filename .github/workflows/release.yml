@@ -1,0 +1,271 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish, for example v1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.41.4
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
+          if [[ -z "$package_version" || "v$package_version" != "$RELEASE_TAG" ]]; then
+            echo "pubspec version '$package_version' does not match tag '$RELEASE_TAG'" >&2
+            exit 1
+          fi
+          echo "version=$package_version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  android:
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "cmdline-tools;latest" "ndk;28.2.13676358"
+
+      - name: Restore Android release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          mkdir -p .secrets
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > .secrets/murphy-upload.jks
+          keytool -list \
+            -keystore .secrets/murphy-upload.jks \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+      - name: Create Android weather configuration
+        env:
+          QWEATHER_API_HOST: ${{ secrets.QWEATHER_API_HOST }}
+          QWEATHER_ANDROID_API_KEY: ${{ secrets.QWEATHER_ANDROID_API_KEY }}
+          QWEATHER_ANDROID_CERT_SHA1: ${{ secrets.QWEATHER_ANDROID_CERT_SHA1 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$QWEATHER_API_HOST"
+          test -n "$QWEATHER_ANDROID_API_KEY"
+          test -n "$QWEATHER_ANDROID_CERT_SHA1"
+          jq -n \
+            --arg host "$QWEATHER_API_HOST" \
+            --arg key "$QWEATHER_ANDROID_API_KEY" \
+            --arg cert "$QWEATHER_ANDROID_CERT_SHA1" \
+            '{QWEATHER_API_HOST: $host, QWEATHER_ANDROID_API_KEY: $key, QWEATHER_ANDROID_CERT_SHA1: $cert}' \
+            > .release-qweather-android.json
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build signed APK and app bundle
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/.secrets/murphy-upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --release \
+            --obfuscate \
+            --split-debug-info=build/symbols/android \
+            --dart-define-from-file=.release-qweather-android.json
+          flutter build appbundle --release \
+            --obfuscate \
+            --split-debug-info=build/symbols/android \
+            --dart-define-from-file=.release-qweather-android.json
+
+      - name: Verify and collect Android artifacts
+        env:
+          VERSION: ${{ needs.quality.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          apk="dist/MurphyWeather-${VERSION}-android.apk"
+          aab="dist/MurphyWeather-${VERSION}-android.aab"
+          cp build/app/outputs/flutter-apk/app-release.apk "$apk"
+          cp build/app/outputs/bundle/release/app-release.aab "$aab"
+          apksigner=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          "$apksigner" verify --verbose --print-certs "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          sha256sum "$aab" > "$aab.sha256"
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    needs: quality
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Create iOS weather configuration
+        env:
+          QWEATHER_API_HOST: ${{ secrets.QWEATHER_API_HOST }}
+          QWEATHER_IOS_API_KEY: ${{ secrets.QWEATHER_IOS_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$QWEATHER_API_HOST"
+          test -n "$QWEATHER_IOS_API_KEY"
+          jq -n \
+            --arg host "$QWEATHER_API_HOST" \
+            --arg key "$QWEATHER_IOS_API_KEY" \
+            '{QWEATHER_API_HOST: $host, QWEATHER_IOS_API_KEY: $key}' \
+            > .release-qweather-ios.json
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build unsigned iOS release
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build ios --release --no-codesign \
+            --obfuscate \
+            --split-debug-info=build/symbols/ios \
+            --dart-define-from-file=.release-qweather-ios.json
+
+      - name: Collect iOS verification artifact
+        env:
+          VERSION: ${{ needs.quality.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          archive="dist/MurphyWeather-${VERSION}-ios-unsigned.app.zip"
+          ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app "$archive"
+          shasum -a 256 "$archive" > "$archive.sha256"
+
+      - name: Upload iOS verification artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-verification
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs:
+      - quality
+      - android
+      - ios
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release*'
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.quality.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Murphy $VERSION" \
+              --repo "$GITHUB_REPOSITORY"
+          fi

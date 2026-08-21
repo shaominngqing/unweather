@@ -87,3 +87,21 @@ flutter analyze
 flutter test
 flutter build apk --debug
 ```
+
+## 自动化发布
+
+- 推送到 `master` 会运行格式检查、静态分析和完整测试。
+- 推送与 `pubspec.yaml` 版本一致的标签（例如 `v1.0.0`）会构建正式签名的 Android APK/AAB、执行 iOS Release 无签名编译检查，并创建 GitHub Release。
+- Android 发布签名与天气凭据保存在 GitHub Actions Secrets，不写入仓库。
+- App Store/TestFlight 的可分发 IPA 仍需 Apple Distribution 证书、描述文件和 App Store Connect 权限；CI 中的 `ios-unsigned.app.zip` 仅用于验证，不能直接安装。
+
+首次配置流水线需要以下仓库 Secrets：
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `QWEATHER_API_HOST`
+- `QWEATHER_ANDROID_API_KEY`
+- `QWEATHER_ANDROID_CERT_SHA1`
+- `QWEATHER_IOS_API_KEY`
